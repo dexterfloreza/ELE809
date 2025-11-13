@@ -5,7 +5,7 @@ clc; clear; close all;
 Tf = 3.0;                % total run time [s]
 Fs = 150;                % sampling frequency [Hz]
 Ts = 1/Fs;
-t  = (0:Ts:Tf);          % time vector
+t  = (0:Ts:Tf);
 Ns = length(t);
 
 %% === Square-wave Reference: ±50° @ 0.5 Hz ===
@@ -21,27 +21,27 @@ Gamma = [0.00033;
 C = [0 1 0];
 D = 0;
 
-%% === Controller Gains (from Part B) ===
-K = [145 22 11.5];
-Nbar = 1.06;
+%% === Controller Gains (from Part B, scaled down for stability test) ===
+K = [14.5 2.2 1.15];   % reduced from [145 22 11.5]
+Nbar = 0.5;            % reduced from 1.06
 
-%% === Extended Estimator Design (from Part C) ===
+%% === Extended Estimator Design (Part C) ===
 A_e = [Phi Gamma;
        zeros(1,3) 1];
 B_e = [Gamma; 0];
 C_e = [C 0];
 
-% Fast near-zero estimator poles (avoid multiplicity/rank issue)
-L_e = place(A_e', C_e', [0.01 0.02 0.03 0.04])';
+% Moderately fast poles near origin (avoid rank & numerical issues)
+L_e = place(A_e', C_e', [0.3 0.4 0.5 0.6])';
 
 %% === Initialize States ===
-x = zeros(3,1);           % actual plant states
-x_hat = zeros(3,1);       % estimated states
-w_hat = 0;                % estimated disturbance
+x = zeros(3,1);         % true states
+x_hat = zeros(3,1);     % estimated states
+w_hat = 0;              % estimated disturbance
 x_e_hat = [x_hat; w_hat];
 
-% Constant DC disturbance (optional – helps verify rejection)
-w = 0.15;                 % add/subtract this from u(k) in plant update
+% Optional DC disturbance to test rejection
+w = 0.15;               % add to actuator input (simulated)
 
 % Logs
 y = zeros(Ns,1);
@@ -51,19 +51,22 @@ x_hat_log = zeros(Ns,3);
 
 %% === Simulation Loop ===
 for k = 1:Ns
-    % Control law with disturbance compensation
+    % --- Control law with disturbance compensation ---
     u(k) = Nbar*r(k) - K*x_hat - w_hat;
 
-    % Plant update (simulate disturbance at actuator input)
+    % --- Saturation (simulate ±10 V actuator limits) ---
+    u(k) = max(min(u(k), 10), -10);
+
+    % --- Plant update with constant disturbance ---
     x = Phi*x + Gamma*(u(k) + w);
     y(k) = C*x;
 
-    % Extended estimator update
+    % --- Extended estimator update ---
     x_e_hat = A_e*x_e_hat + B_e*u(k) + L_e*(y(k) - C_e*x_e_hat);
     x_hat = x_e_hat(1:3);
     w_hat = x_e_hat(4);
 
-    % Log data
+    % --- Log data ---
     w_hat_log(k) = w_hat;
     x_hat_log(k,:) = x_hat.';
 end
@@ -109,5 +112,9 @@ fprintf('Percent Overshoot ≈ %.2f %%\n', PO);
 
 tol = 0.01*abs(ss_value);
 idx = find(abs(y_deg - ss_value) > tol, 1, 'last');
-Ts_1 = t(idx);
-fprintf('Settling Time (1%%) ≈ %.4f s\n', Ts_1);
+if ~isempty(idx)
+    Ts_1 = t(idx);
+    fprintf('Settling Time (1%%) ≈ %.4f s\n', Ts_1);
+else
+    fprintf('Settling Time (1%%): response already settled\n');
+end
